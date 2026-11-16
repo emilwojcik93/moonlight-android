@@ -77,6 +77,12 @@
             android:title="@string/title_client_posture"
             android:dialogTitle="@string/title_client_posture"
             app:iconSpaceReserved="false" />
+        <CheckBoxPreference
+            android:defaultValue="true"
+            android:key="checkbox_reconnect_on_posture"
+            android:summary="@string/summary_reconnect_on_posture"
+            android:title="@string/title_reconnect_on_posture"
+            app:iconSpaceReserved="false" />
 
         <CheckBoxPreference
             android:defaultValue="false"
