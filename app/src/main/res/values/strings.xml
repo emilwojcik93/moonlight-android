@@ -584,6 +584,7 @@
     <string name="summary_client_posture">Tells a supporting host (Vibepollo) whether this is a touch device, so it can adapt the virtual display. Auto detects the device; hosts that do not support it ignore the hint.</string>
     <string name="title_reconnect_on_posture">Reconnect when posture changes</string>
     <string name="summary_reconnect_on_posture">When a physical keyboard is attached or detached during a stream, resume the same app so the host can resize its virtual display. At most once a minute.</string>
+    <string name="posture_reconnecting">Keyboard state changed, reconnecting&#8230;</string>
     <string name="client_posture_auto">Auto</string>
     <string name="client_posture_always_tablet">Always tablet</string>
     <string name="client_posture_never">Never send</string>

@@ -38,6 +38,7 @@ import com.limelight.nvstream.input.KeyboardPacket;
 import com.limelight.nvstream.input.MouseButtonPacket;
 import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.posture.PostureClassifier;
+import com.limelight.posture.PostureReconnectGate;
 import com.limelight.posture.PostureSignals;
 import com.limelight.preferences.GlPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
@@ -117,6 +118,7 @@ import androidx.core.app.NotificationManagerCompat;
 import androidx.preference.PreferenceManager;
 
 import android.os.Looper;
+import android.os.SystemClock;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.List;
@@ -391,12 +393,37 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private NvHTTP httpConn;
     // Posture the host was last told about (null when the user chose Never)
     private PostureClassifier.Result clientPosture;
+    // Posture the host display was created with (launch or last reconnect)
+    private PostureClassifier.Result streamPosture;
     private Display postureDisplay;
-    private static final long POSTURE_DEBOUNCE_MS = 3000;
+    private long connectedAtMs;
+    private boolean postureListenerRegistered;
+    private static final long POSTURE_DEBOUNCE_MS = 1000;
+    // Elapsed-realtime of the last posture reconnect (survives the Game instance), -1 if none
+    private static long lastPostureReconnectMs = -1;
+    // Intent to start once this instance is destroyed (resume of the same app)
+    private Intent pendingPostureRelaunch;
     private final Runnable postureCheck = new Runnable() {
         @Override
         public void run() {
             checkPostureChange();
+        }
+    };
+    // Keyboard attach/detach arrives as input device events; rotation never does
+    private final InputManager.InputDeviceListener postureDeviceListener = new InputManager.InputDeviceListener() {
+        @Override
+        public void onInputDeviceAdded(int deviceId) {
+            schedulePostureCheck();
+        }
+
+        @Override
+        public void onInputDeviceRemoved(int deviceId) {
+            schedulePostureCheck();
+        }
+
+        @Override
+        public void onInputDeviceChanged(int deviceId) {
+            schedulePostureCheck();
         }
     };
 
@@ -909,6 +936,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // Posture hint for hosts that adapt the virtual display to touch devices (null = Never)
         postureDisplay = currentDisplay;
         clientPosture = PostureSignals.classify(this, currentDisplay, prefConfig.clientPostureOverride);
+        streamPosture = clientPosture;
 
         StreamConfiguration config = new StreamConfiguration.Builder()
                 .setResolution(
@@ -1273,8 +1301,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
     }
 
-    // Debounced (3 s) re-check of the client posture after configuration changes such as a
-    // keyboard dock/undock or a 2-in-1 flip. Game declares these in android:configChanges.
+    // Debounced (1 s) re-check of the client posture after input device events (physical keyboard
+    // attached/detached) and configuration changes. Rotation does not change the result.
     private void schedulePostureCheck() {
         if (clientPosture == null || httpConn == null || timerHandler == null) {
             return;
@@ -1284,29 +1312,58 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     private void checkPostureChange() {
-        if (!connected || clientPosture == null || httpConn == null) {
+        if (!connected || clientPosture == null || httpConn == null || pendingPostureRelaunch != null) {
             return;
         }
 
         PostureClassifier.Result current = PostureSignals.classify(this, postureDisplay, prefConfig.clientPostureOverride);
-        if (current == null || !PostureClassifier.crossesBoundary(clientPosture, current)) {
+        if (current == null) {
             return;
         }
 
-        clientPosture = current;
-        final String query = current.toQuery();
-        // Fire and forget: errors (including stock hosts without /posture) are only logged
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    httpConn.sendPosture(query);
-                    LimeLog.info("Sent posture update: " + query);
-                } catch (Exception e) {
-                    LimeLog.warning("Posture update failed: " + e.getMessage());
+        boolean tellHost = PostureClassifier.crossesBoundary(clientPosture, current);
+        boolean displayStale = PostureClassifier.crossesBoundary(streamPosture, current);
+        if (!tellHost && !displayStale) {
+            return;
+        }
+
+        if (tellHost) {
+            clientPosture = current;
+            final String query = current.toQuery();
+            // Fire and forget: errors (including stock hosts without /posture) are only logged
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        httpConn.sendPosture(query);
+                        LimeLog.info("Sent posture update: " + query);
+                    } catch (Exception e) {
+                        LimeLog.warning("Posture update failed: " + e.getMessage());
+                    }
                 }
-            }
-        }, "PostureUpdate").start();
+            }, "PostureUpdate").start();
+        }
+
+        // The host reads the monitor size only when the display is created, so a flip needs a resume.
+        long delay = PostureReconnectGate.delayMs(prefConfig.reconnectOnPostureChange, connected,
+                SystemClock.elapsedRealtime(), connectedAtMs, lastPostureReconnectMs);
+        if (delay == 0) {
+            reconnectForPosture();
+        } else if (delay > 0) {
+            // Startup guard or cooldown: ask again later with the then-current state
+            timerHandler.removeCallbacks(postureCheck);
+            timerHandler.postDelayed(postureCheck, delay + 50);
+        }
+    }
+
+    // Resume the same app: stop this session cleanly (no quit) and start a new Game with the
+    // same intent, which makes the host resume the running app with the new posture args.
+    private void reconnectForPosture() {
+        LimeLog.info("Posture changed, resuming " + appName);
+        lastPostureReconnectMs = SystemClock.elapsedRealtime();
+        pendingPostureRelaunch = new Intent(getIntent());
+        Toast.makeText(this, R.string.posture_reconnecting, Toast.LENGTH_SHORT).show();
+        finish();
     }
 
     @Override
@@ -1946,6 +2003,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             InputManager inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
             inputManager.unregisterInputDeviceListener(keyboardTranslator);
         }
+        if (postureListenerRegistered) {
+            ((InputManager) getSystemService(Context.INPUT_SERVICE)).unregisterInputDeviceListener(postureDeviceListener);
+            postureListenerRegistered = false;
+        }
 
         if (lowLatencyWifiLock != null) {
             lowLatencyWifiLock.release();
@@ -1976,6 +2037,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // Destroy the capture provider
         inputCaptureProvider.destroy();
         streamContainer.onDestroy();
+
+        if (pendingPostureRelaunch != null) {
+            Intent again = pendingPostureRelaunch;
+            pendingPostureRelaunch = null;
+            startActivity(again);
+        }
     }
 
     @Override
@@ -3944,7 +4011,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 // Ensure frame-rate hint is applied when streaming starts (some devices need a re-apply)
                 applySurfaceFrameRateHintIfPossible();
 
-                // Catch up with any posture change that happened while connecting
+                // Watch for a physical keyboard being attached or detached while streaming and
+                // catch up with any posture change that happened while connecting
+                connectedAtMs = SystemClock.elapsedRealtime();
+                if (clientPosture != null && !postureListenerRegistered) {
+                    ((InputManager) getSystemService(Context.INPUT_SERVICE))
+                            .registerInputDeviceListener(postureDeviceListener, timerHandler);
+                    postureListenerRegistered = true;
+                }
                 schedulePostureCheck();
 
                 // Hide the mouse cursor now after a short delay.
