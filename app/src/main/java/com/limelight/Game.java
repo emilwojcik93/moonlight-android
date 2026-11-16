@@ -389,7 +389,16 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private boolean clipboardSyncRunning = false;
 
     private NvHTTP httpConn;
+    // Posture the host was last told about (null when the user chose Never)
     private PostureClassifier.Result clientPosture;
+    private Display postureDisplay;
+    private static final long POSTURE_DEBOUNCE_MS = 3000;
+    private final Runnable postureCheck = new Runnable() {
+        @Override
+        public void run() {
+            checkPostureChange();
+        }
+    };
 
     public interface GameMenuCallbacks {
         void showMenu(GameInputDevice devic);
@@ -898,6 +907,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         // Posture hint for hosts that adapt the virtual display to touch devices (null = Never)
+        postureDisplay = currentDisplay;
         clientPosture = PostureSignals.classify(this, currentDisplay, prefConfig.clientPostureOverride);
 
         StreamConfiguration config = new StreamConfiguration.Builder()
@@ -1263,9 +1273,47 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
     }
 
+    // Debounced (3 s) re-check of the client posture after configuration changes such as a
+    // keyboard dock/undock or a 2-in-1 flip. Game declares these in android:configChanges.
+    private void schedulePostureCheck() {
+        if (clientPosture == null || httpConn == null || timerHandler == null) {
+            return;
+        }
+        timerHandler.removeCallbacks(postureCheck);
+        timerHandler.postDelayed(postureCheck, POSTURE_DEBOUNCE_MS);
+    }
+
+    private void checkPostureChange() {
+        if (!connected || clientPosture == null || httpConn == null) {
+            return;
+        }
+
+        PostureClassifier.Result current = PostureSignals.classify(this, postureDisplay, prefConfig.clientPostureOverride);
+        if (current == null || !PostureClassifier.crossesBoundary(clientPosture, current)) {
+            return;
+        }
+
+        clientPosture = current;
+        final String query = current.toQuery();
+        // Fire and forget: errors (including stock hosts without /posture) are only logged
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    httpConn.sendPosture(query);
+                    LimeLog.info("Sent posture update: " + query);
+                } catch (Exception e) {
+                    LimeLog.warning("Posture update failed: " + e.getMessage());
+                }
+            }
+        }, "PostureUpdate").start();
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+
+        schedulePostureCheck();
 
         // Set requested orientation for possible new screen size
         setPreferredOrientationForActivity();
@@ -3895,6 +3943,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 updatePipAutoEnter();
                 // Ensure frame-rate hint is applied when streaming starts (some devices need a re-apply)
                 applySurfaceFrameRateHintIfPossible();
+
+                // Catch up with any posture change that happened while connecting
+                schedulePostureCheck();
 
                 // Hide the mouse cursor now after a short delay.
                 // Doing it before dismissing the spinner seems to be undone
