@@ -920,6 +920,14 @@ public class NvHTTP {
         return true;
     }
 
+    // Mid-stream posture update for hosts that support it (Vibepollo /posture). Stock hosts
+    // answer with an error (404 or non-200 status), which surfaces as an exception here.
+    public void sendPosture(String query) throws IOException, XmlPullParserException {
+        String xmlStr = openHttpConnectionToString(httpClientLongConnectTimeout, getHttpsUrl(true), "posture", query);
+        // Parsing the root element throws HostHttpResponseException on a non-200 status_code
+        getXmlString(xmlStr, "root", false);
+    }
+
     public String getClipboard() throws IOException {
         // Add type for future-proof
         // Might return arbitrary type from host if not set
