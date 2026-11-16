@@ -7,23 +7,18 @@ import java.util.Locale;
  *
  * This class is deliberately free of Android dependencies: every input is a plain value
  * (see {@link Inputs}) so the decision logic can be unit tested on a plain JVM.
- * Wire format follows the stream-posture-sync contract v1.
+ * Wire format follows the stream-posture-sync contract v2: only {@code clientPosture} and
+ * {@code clientTouch} are sent. Screen size, density, aspect ratio and orientation never take
+ * part in the decision. The result only says whether the device is touch-primary (phone/tablet)
+ * or has a physical keyboard in use (laptop), or is not a touch device at all (desktop).
  */
 public final class PostureClassifier {
-    public static final int MIN_DIAGONAL_MM = 50;
-    public static final int MAX_DIAGONAL_MM = 800;
-    public static final int MIN_DPI = 72;
-    public static final int MAX_DPI = 800;
-
-    /** Smallest width (dp) at which a touch device is considered a tablet. */
+    /**
+     * Smallest width (dp) at which a touch device is labelled "tablet" instead of "phone".
+     * Diagnostics only: the host treats both labels the same. The smallest width does not
+     * change when the device is rotated.
+     */
     public static final int TABLET_MIN_SMALLEST_WIDTH_DP = 600;
-
-    private static final double MM_PER_INCH = 25.4;
-
-    // Manufacturers that only (or almost only) build handheld gaming devices.
-    private static final String[] HANDHELD_MANUFACTURERS = {
-            "ayaneo", "ayn", "retroid", "anbernic"
-    };
 
     public enum Posture {
         DESKTOP, LAPTOP, TABLET, HANDHELD, PHONE;
@@ -59,34 +54,26 @@ public final class PostureClassifier {
         /** The stream is shown on a secondary (external) display. */
         public boolean externalDisplay;
         public boolean hasTouchscreen;
-        /** A hardware keyboard is present and not hidden. */
+        /** Configuration.keyboard/hardKeyboardHidden say a hardware keyboard is present (weak hint). */
         public boolean hardKeyboardAttached;
-        public boolean knownHandheld;
+        /** An enabled, non-virtual InputDevice with an alphabetic keyboard is attached (BT/USB). */
+        public boolean alphabeticKeyboardDevice;
+        /** Smallest screen width in dp; only picks the phone/tablet label. 0 if unknown. */
         public int smallestWidthDp;
-        /** Physical diagonal as reported by the OS, 0 if unknown. */
-        public double diagonalMm;
-        /** Screen density as reported by the OS, 0 if unknown. */
-        public int dpi;
     }
 
     public static final class Result {
         public final Posture posture;
         public final Confidence confidence;
         public final boolean touch;
-        /** Validated diagonal, or 0 when unknown/out of range. */
-        public final int diagonalMm;
-        /** Validated density, or 0 when unknown/out of range. */
-        public final int dpi;
 
-        Result(Posture posture, Confidence confidence, boolean touch, int diagonalMm, int dpi) {
+        Result(Posture posture, Confidence confidence, boolean touch) {
             this.posture = posture;
             this.confidence = confidence;
             this.touch = touch;
-            this.diagonalMm = diagonalMm;
-            this.dpi = dpi;
         }
 
-        /** True when the host touch/size policy would apply (tablet, handheld, phone). */
+        /** True when the host touch policy would apply (tablet, handheld, phone). */
         public boolean isTouchClass() {
             return posture == Posture.TABLET || posture == Posture.HANDHELD || posture == Posture.PHONE;
         }
@@ -96,12 +83,6 @@ public final class PostureClassifier {
             StringBuilder sb = new StringBuilder();
             sb.append("clientPosture=").append(posture.wireValue());
             sb.append("&clientTouch=").append(touch ? 1 : 0);
-            if (diagonalMm != 0) {
-                sb.append("&clientDiagonalMm=").append(diagonalMm);
-            }
-            if (dpi != 0) {
-                sb.append("&clientDpi=").append(dpi);
-            }
             return sb.toString();
         }
 
@@ -122,74 +103,35 @@ public final class PostureClassifier {
             return null;
         }
 
-        int diag = validDiagonalMm(in.diagonalMm);
-        int dpi = validDpi(in.dpi);
-
         if (in.override == UserOverride.ALWAYS_TABLET) {
-            return new Result(Posture.TABLET, Confidence.HIGH, true, diag, dpi);
+            return new Result(Posture.TABLET, Confidence.HIGH, true);
         }
 
         if (in.nonHandheldUiMode || in.externalDisplay || !in.hasTouchscreen) {
             // TV, car, desk dock, no touch hardware or a monitor: behaves like a desktop.
-            return new Result(Posture.DESKTOP, Confidence.HIGH, false, diag, dpi);
+            return new Result(Posture.DESKTOP, Confidence.HIGH, false);
         }
 
-        if (in.knownHandheld) {
-            return new Result(Posture.HANDHELD, Confidence.HIGH, true, diag, dpi);
+        if (in.alphabeticKeyboardDevice || in.hardKeyboardAttached) {
+            // A physical keyboard is in use: the host keeps its default display size.
+            // The InputDevice scan is reliable; the Configuration hint alone is not.
+            return new Result(Posture.LAPTOP,
+                    in.alphabeticKeyboardDevice ? Confidence.HIGH : Confidence.LOW, false);
         }
 
-        if (in.smallestWidthDp >= TABLET_MIN_SMALLEST_WIDTH_DP) {
-            if (in.hardKeyboardAttached) {
-                // Touch tablet with a docked keyboard: laptop-like, but the signal is ambiguous.
-                return new Result(Posture.LAPTOP, Confidence.LOW, true, diag, dpi);
-            }
-            return new Result(Posture.TABLET, Confidence.HIGH, true, diag, dpi);
-        }
-
-        // A phone with a paired keyboard is still a phone; only the confidence drops.
-        Confidence c = (in.smallestWidthDp <= 0 || in.hardKeyboardAttached) ? Confidence.LOW : Confidence.HIGH;
-        return new Result(Posture.PHONE, c, true, diag, dpi);
+        // Touch-primary. The label does not matter to the host.
+        Posture label = in.smallestWidthDp >= TABLET_MIN_SMALLEST_WIDTH_DP ? Posture.TABLET : Posture.PHONE;
+        return new Result(label, in.smallestWidthDp <= 0 ? Confidence.LOW : Confidence.HIGH, true);
     }
 
     /**
-     * Mid-stream rule: only a switch between "touch policy applies" and "does not apply"
-     * is worth telling the host about. Phone to tablet and similar changes are not.
+     * Mid-stream rule: only a switch between "touch-primary" and "not touch-primary"
+     * (keyboard attached or detached) is worth telling the host about. Phone to tablet,
+     * rotation and similar changes are not.
      */
     public static boolean crossesBoundary(Result previous, Result current) {
         boolean before = previous != null && previous.isTouchClass();
         boolean after = current != null && current.isTouchClass();
         return before != after;
-    }
-
-    public static boolean isKnownHandheldManufacturer(String manufacturer) {
-        if (manufacturer == null) {
-            return false;
-        }
-        String m = manufacturer.trim().toLowerCase(Locale.ROOT);
-        for (String h : HANDHELD_MANUFACTURERS) {
-            if (m.equals(h)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** Diagonal in mm from pixel size and per-axis density; 0 if any input is unusable. */
-    public static double diagonalMmFromPixels(int widthPx, int heightPx, float xdpi, float ydpi) {
-        if (widthPx <= 0 || heightPx <= 0 || !(xdpi > 0) || !(ydpi > 0)) {
-            return 0;
-        }
-        double w = widthPx / (double) xdpi;
-        double h = heightPx / (double) ydpi;
-        return Math.sqrt(w * w + h * h) * MM_PER_INCH;
-    }
-
-    static int validDiagonalMm(double mm) {
-        long rounded = Math.round(mm);
-        return (rounded >= MIN_DIAGONAL_MM && rounded <= MAX_DIAGONAL_MM) ? (int) rounded : 0;
-    }
-
-    static int validDpi(int dpi) {
-        return (dpi >= MIN_DPI && dpi <= MAX_DPI) ? dpi : 0;
     }
 }

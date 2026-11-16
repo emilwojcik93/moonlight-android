@@ -21,48 +21,58 @@ public class PostureClassifierTest {
         return in;
     }
 
+    private static Inputs withKeyboardDevice(int swDp) {
+        Inputs in = touchDevice(swDp);
+        in.alphabeticKeyboardDevice = true;
+        return in;
+    }
+
     @Test
-    public void phone() {
-        Inputs in = touchDevice(411);
-        in.diagonalMm = 160.4;
-        in.dpi = 420;
-        Result r = PostureClassifier.classify(in);
+    public void phoneSendsOnlyPostureAndTouch() {
+        Result r = PostureClassifier.classify(touchDevice(411));
         assertEquals(Posture.PHONE, r.posture);
         assertEquals(Confidence.HIGH, r.confidence);
         assertTrue(r.touch);
-        assertEquals("clientPosture=phone&clientTouch=1&clientDiagonalMm=160&clientDpi=420", r.toLaunchQuery());
+        assertEquals("clientPosture=phone&clientTouch=1", r.toLaunchQuery());
     }
 
     @Test
-    public void tabletBySmallestWidth() {
+    public void tabletLabelBySmallestWidthIsOnlyALabel() {
         Result r = PostureClassifier.classify(touchDevice(600));
         assertEquals(Posture.TABLET, r.posture);
-        assertEquals(Confidence.HIGH, r.confidence);
         assertEquals("clientPosture=tablet&clientTouch=1", r.toLaunchQuery());
-    }
-
-    @Test
-    public void justBelowTabletThresholdIsPhone() {
         assertEquals(Posture.PHONE, PostureClassifier.classify(touchDevice(599)).posture);
+        // both labels are touch-primary: switching between them is never a boundary
+        assertFalse(PostureClassifier.crossesBoundary(
+                PostureClassifier.classify(touchDevice(599)), r));
     }
 
     @Test
-    public void tabletWithKeyboardIsLowConfidenceLaptop() {
-        Inputs in = touchDevice(800);
+    public void physicalKeyboardDeviceMeansLaptopOnPhoneAndTablet() {
+        for (int sw : new int[]{360, 411, 800}) {
+            Result r = PostureClassifier.classify(withKeyboardDevice(sw));
+            assertEquals(Posture.LAPTOP, r.posture);
+            assertEquals(Confidence.HIGH, r.confidence);
+            assertFalse(r.touch);
+            assertFalse(r.isTouchClass());
+            assertEquals("clientPosture=laptop&clientTouch=0", r.toLaunchQuery());
+        }
+    }
+
+    @Test
+    public void configurationKeyboardHintAloneIsLowConfidenceLaptop() {
+        Inputs in = touchDevice(400);
         in.hardKeyboardAttached = true;
         Result r = PostureClassifier.classify(in);
         assertEquals(Posture.LAPTOP, r.posture);
         assertEquals(Confidence.LOW, r.confidence);
-        assertFalse(r.isTouchClass());
     }
 
     @Test
-    public void phoneWithKeyboardStaysPhoneLowConfidence() {
-        Inputs in = touchDevice(400);
-        in.hardKeyboardAttached = true;
-        Result r = PostureClassifier.classify(in);
-        assertEquals(Posture.PHONE, r.posture);
-        assertEquals(Confidence.LOW, r.confidence);
+    public void noKeyboardIsTouchPrimary() {
+        Result r = PostureClassifier.classify(touchDevice(800));
+        assertTrue(r.touch);
+        assertTrue(r.isTouchClass());
     }
 
     @Test
@@ -73,10 +83,12 @@ public class PostureClassifierTest {
     }
 
     @Test
-    public void handheldBeatsSizeClass() {
-        Inputs in = touchDevice(640);
-        in.knownHandheld = true;
-        assertEquals(Posture.HANDHELD, PostureClassifier.classify(in).posture);
+    public void queryNeverCarriesSizeOrDensity() {
+        for (int sw : new int[]{0, 320, 411, 600, 1000}) {
+            String q = PostureClassifier.classify(touchDevice(sw)).toQuery();
+            assertFalse(q, q.contains("Diagonal"));
+            assertFalse(q, q.contains("Dpi"));
+        }
     }
 
     @Test
@@ -88,6 +100,13 @@ public class PostureClassifierTest {
         assertFalse(r.touch);
         assertEquals("", r.toLaunchQuery());
         assertEquals("clientPosture=desktop&clientTouch=0", r.toQuery());
+    }
+
+    @Test
+    public void tvWithKeyboardStaysDesktop() {
+        Inputs in = withKeyboardDevice(960);
+        in.nonHandheldUiMode = true;
+        assertEquals(Posture.DESKTOP, PostureClassifier.classify(in).posture);
     }
 
     @Test
@@ -112,8 +131,8 @@ public class PostureClassifierTest {
     }
 
     @Test
-    public void alwaysTabletWinsEvenOnTvOrNoTouch() {
-        Inputs in = new Inputs();
+    public void alwaysTabletWinsEvenOnTvOrWithKeyboard() {
+        Inputs in = withKeyboardDevice(0);
         in.override = UserOverride.ALWAYS_TABLET;
         in.nonHandheldUiMode = true;
         Result r = PostureClassifier.classify(in);
@@ -132,43 +151,10 @@ public class PostureClassifierTest {
     }
 
     @Test
-    public void outOfRangeValuesAreOmitted() {
-        Inputs in = touchDevice(411);
-        in.diagonalMm = 49.4;   // < 50
-        in.dpi = 71;            // < 72
-        assertEquals("clientPosture=phone&clientTouch=1", PostureClassifier.classify(in).toQuery());
-
-        in.diagonalMm = 800.6;  // rounds to 801 > 800
-        in.dpi = 801;
-        assertEquals("clientPosture=phone&clientTouch=1", PostureClassifier.classify(in).toQuery());
-
-        in.diagonalMm = 50;
-        in.dpi = 72;
-        assertEquals("clientPosture=phone&clientTouch=1&clientDiagonalMm=50&clientDpi=72",
-                PostureClassifier.classify(in).toQuery());
-
-        in.diagonalMm = 800;
-        in.dpi = 800;
-        assertEquals("clientPosture=phone&clientTouch=1&clientDiagonalMm=800&clientDpi=800",
-                PostureClassifier.classify(in).toQuery());
-    }
-
-    @Test
-    public void nanAndNegativeDiagonalOmitted() {
-        Inputs in = touchDevice(411);
-        in.diagonalMm = Double.NaN;
-        assertEquals("clientPosture=phone&clientTouch=1", PostureClassifier.classify(in).toQuery());
-        in.diagonalMm = -5;
-        assertEquals("clientPosture=phone&clientTouch=1", PostureClassifier.classify(in).toQuery());
-    }
-
-    @Test
-    public void boundaryOnlyOnNoneSomeChange() {
+    public void boundaryOnlyWhenKeyboardStateFlips() {
         Result phone = PostureClassifier.classify(touchDevice(400));
         Result tablet = PostureClassifier.classify(touchDevice(700));
-        Inputs kb = touchDevice(700);
-        kb.hardKeyboardAttached = true;
-        Result laptop = PostureClassifier.classify(kb);
+        Result laptop = PostureClassifier.classify(withKeyboardDevice(700));
         Inputs tv = touchDevice(700);
         tv.nonHandheldUiMode = true;
         Result desktop = PostureClassifier.classify(tv);
@@ -183,19 +169,25 @@ public class PostureClassifierTest {
     }
 
     @Test
-    public void diagonalFromPixels() {
-        // 1920x1200 at 224 dpi both axes ~ 10.1 in ~ 257 mm
-        double mm = PostureClassifier.diagonalMmFromPixels(1920, 1200, 224f, 224f);
-        assertEquals(257.0, mm, 2.0);
-        assertEquals(0.0, PostureClassifier.diagonalMmFromPixels(1920, 1200, 0f, 224f), 0.0);
-        assertEquals(0.0, PostureClassifier.diagonalMmFromPixels(0, 1200, 224f, 224f), 0.0);
+    public void rotationAloneNeverFlipsState() {
+        // Rotation swaps width and height but the smallest width (the only size input, used for
+        // the label) is the same, and no keyboard signal changes.
+        Result portrait = PostureClassifier.classify(touchDevice(411));
+        Result landscape = PostureClassifier.classify(touchDevice(411));
+        assertEquals(portrait.toQuery(), landscape.toQuery());
+        assertFalse(PostureClassifier.crossesBoundary(portrait, landscape));
     }
 
     @Test
-    public void knownHandheldManufacturers() {
-        assertTrue(PostureClassifier.isKnownHandheldManufacturer("AYANEO"));
-        assertTrue(PostureClassifier.isKnownHandheldManufacturer(" Retroid "));
-        assertFalse(PostureClassifier.isKnownHandheldManufacturer("samsung"));
-        assertFalse(PostureClassifier.isKnownHandheldManufacturer(null));
+    public void keyboardFlipSequence() {
+        // attach, detach, attach: each step is a boundary crossing
+        Result t0 = PostureClassifier.classify(touchDevice(411));
+        Result k1 = PostureClassifier.classify(withKeyboardDevice(411));
+        Result t2 = PostureClassifier.classify(touchDevice(411));
+        Result k3 = PostureClassifier.classify(withKeyboardDevice(411));
+        assertTrue(PostureClassifier.crossesBoundary(t0, k1));
+        assertTrue(PostureClassifier.crossesBoundary(k1, t2));
+        assertTrue(PostureClassifier.crossesBoundary(t2, k3));
+        assertFalse(PostureClassifier.crossesBoundary(k1, k3));
     }
 }

@@ -7,12 +7,14 @@ import android.content.res.Configuration;
 import android.os.Build;
 import android.util.DisplayMetrics;
 import android.view.Display;
+import android.view.InputDevice;
 
 /**
  * Reads the Android signals and hands them to {@link PostureClassifier}.
  *
  * Jetpack WindowManager fold posture is intentionally not used: androidx.window is not a
  * dependency of this project and a fold does not change the class sent to the host.
+ * Screen size and density are not sent (contract v2); only the touch/keyboard state is.
  */
 public final class PostureSignals {
     private PostureSignals() {
@@ -45,16 +47,14 @@ public final class PostureSignals {
         in.hasTouchscreen = context.getPackageManager()
                 .hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
 
-        in.knownHandheld = PostureClassifier.isKnownHandheldManufacturer(Build.MANUFACTURER);
+        in.alphabeticKeyboardDevice = hasPhysicalAlphabeticKeyboard();
 
         if (display != null) {
             in.externalDisplay = display.getDisplayId() != Display.DEFAULT_DISPLAY;
 
+            // Only used for the phone/tablet label; the short side does not change on rotation.
             DisplayMetrics dm = new DisplayMetrics();
             display.getRealMetrics(dm);
-            in.dpi = dm.densityDpi;
-            in.diagonalMm = PostureClassifier.diagonalMmFromPixels(
-                    dm.widthPixels, dm.heightPixels, dm.xdpi, dm.ydpi);
             if (dm.densityDpi > 0) {
                 int shortSidePx = Math.min(dm.widthPixels, dm.heightPixels);
                 in.smallestWidthDp = Math.round(shortSidePx * 160f / dm.densityDpi);
@@ -65,5 +65,23 @@ public final class PostureSignals {
         }
 
         return PostureClassifier.classify(in);
+    }
+
+    /** A Bluetooth/USB keyboard counts; the on-screen keyboard (virtual) and keypads/gamepads do not. */
+    public static boolean hasPhysicalAlphabeticKeyboard() {
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice dev = InputDevice.getDevice(id);
+            if (dev == null || dev.isVirtual()) {
+                continue;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !dev.isEnabled()) {
+                continue;
+            }
+            if ((dev.getSources() & InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
+                    && dev.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
+                return true;
+            }
+        }
+        return false;
     }
 }
