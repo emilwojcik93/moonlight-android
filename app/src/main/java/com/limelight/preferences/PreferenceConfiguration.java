@@ -7,6 +7,7 @@ import android.os.Build;
 import android.view.Display;
 
 import com.limelight.nvstream.jni.MoonBridge;
+import com.limelight.posture.PostureClassifier;
 import com.limelight.profiles.ProfilesManager;
 import androidx.preference.PreferenceManager;
 
@@ -115,6 +116,8 @@ public class PreferenceConfiguration {
     private static final String SNAPPY_INPUT_PREF_STRING = "checkbox_snappy_input";
     private static final String ENFORCE_DISPLAY_MODE_PREF_STRING = "checkbox_enforce_display_mode";
     private static final String USE_VIRTUAL_DISPLAY_PREF_STRING = "checkbox_use_virtual_display";
+    private static final String CLIENT_POSTURE_PREF_STRING = "list_client_posture";
+    private static final String DEFAULT_CLIENT_POSTURE = "auto";
     private static final String AUTO_INVERT_VIDEO_RESOLUTION_PREF_STRING = "checkbox_auto_invert_video_resolution";
     private static final String RESOLUTION_SCALE_FACTOR_PREF_STRING = "seekbar_resolution_scale_factor";
     private static final String RESUME_WITHOUT_CONFIRM_PREF_STRING = "checkbox_resume_without_confirm";
@@ -490,6 +493,8 @@ public class PreferenceConfiguration {
     public float zoomScale;
     public float panOffsetX;
     public float panOffsetY;
+
+    public PostureClassifier.UserOverride clientPostureOverride;
 
     private static final String CHECKBOX_REMEMBER_ZOOM_PAN = "checkbox_remember_zoom_pan";
     private static final String NUMBER_ZOOM_SCALE = "number_zoom_scale";
@@ -1029,6 +1034,8 @@ public class PreferenceConfiguration {
         // Checkbox preferences
         config.disableWarnings = prefs.getBoolean(DISABLE_TOASTS_PREF_STRING, DEFAULT_DISABLE_TOASTS);
         config.enforceDisplayMode = prefs.getBoolean(ENFORCE_DISPLAY_MODE_PREF_STRING, DEFAULT_ENFORCE_DISPLAY_MODE);
+        config.clientPostureOverride = PostureClassifier.UserOverride.fromPreference(
+                prefs.getString(CLIENT_POSTURE_PREF_STRING, DEFAULT_CLIENT_POSTURE));
         config.useVirtualDisplay = prefs.getBoolean(USE_VIRTUAL_DISPLAY_PREF_STRING, DEFAULT_USE_VIRTUAL_DISPLAY);
         config.enableUltraLowLatency = prefs.getBoolean(ENABLE_ULTRA_LOW_LATENCY_PREF_STRING, DEFAULT_ENABLE_ULTRA_LOW_LATENCY);
         config.enableSops = prefs.getBoolean(SOPS_PREF_STRING, DEFAULT_SOPS);

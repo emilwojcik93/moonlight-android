@@ -68,6 +68,15 @@
             android:summary="@string/summary_checkbox_use_virtual_display"
             android:title="@string/title_checkbox_use_virtual_display"
             app:iconSpaceReserved="false" />
+        <ListPreference
+            android:defaultValue="auto"
+            android:entries="@array/client_posture_names"
+            android:entryValues="@array/client_posture_values"
+            android:key="list_client_posture"
+            android:summary="@string/summary_client_posture"
+            android:title="@string/title_client_posture"
+            android:dialogTitle="@string/title_client_posture"
+            app:iconSpaceReserved="false" />
 
         <CheckBoxPreference
             android:defaultValue="false"
