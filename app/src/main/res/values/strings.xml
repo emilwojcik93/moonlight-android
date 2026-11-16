@@ -566,6 +566,11 @@
     <string name="summary_checkbox_forceTightThresholds">Tighter VSYNC thresholds for lower latency; may increase drops.</string>
     <string name="title_checkbox_use_virtual_display">Use Virtual Display</string>
     <string name="summary_checkbox_use_virtual_display">Use Virtual Display by default.\nVirtual Display can automatically match your client side resolution and frame rate settings, giving you a seamless streaming experience.\nRequires Apollo as host streaming software.</string>
+    <string name="title_client_posture">Device type hint for host</string>
+    <string name="summary_client_posture">Tells a supporting host (Vibepollo) whether this is a touch device, so it can adapt the virtual display. Auto detects the device; hosts that do not support it ignore the hint.</string>
+    <string name="client_posture_auto">Auto</string>
+    <string name="client_posture_always_tablet">Always tablet</string>
+    <string name="client_posture_never">Never send</string>
     <string name="title_checkbox_resume_without_confirm">Quick Resume</string>
     <string name="summary_checkbox_resume_without_confirm">Do not show resume menu when clicking resume button, resume the app immediately.</string>
     <string name="title_checkbox_enable_sticky_modifier_key_virtual_keyboard">Sticky modifier keys</string>
