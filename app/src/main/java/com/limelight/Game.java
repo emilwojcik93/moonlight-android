@@ -37,6 +37,8 @@ import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.nvstream.input.KeyboardPacket;
 import com.limelight.nvstream.input.MouseButtonPacket;
 import com.limelight.nvstream.jni.MoonBridge;
+import com.limelight.posture.PostureClassifier;
+import com.limelight.posture.PostureSignals;
 import com.limelight.preferences.GlPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.profiles.ProfilesManager;
@@ -387,6 +389,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private boolean clipboardSyncRunning = false;
 
     private NvHTTP httpConn;
+    private PostureClassifier.Result clientPosture;
 
     public interface GameMenuCallbacks {
         void showMenu(GameInputDevice devic);
@@ -894,6 +897,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     + nativeDisplaySize.x + "x" + nativeDisplaySize.y + ")");
         }
 
+        // Posture hint for hosts that adapt the virtual display to touch devices (null = Never)
+        clientPosture = PostureSignals.classify(this, currentDisplay, prefConfig.clientPostureOverride);
+
         StreamConfiguration config = new StreamConfiguration.Builder()
                 .setResolution(
                         displayWidth,
@@ -902,6 +908,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 .setLaunchRefreshRate(prefConfig.fps)
                 .setRefreshRate(chosenFrameRate)
                 .setVirtualDisplay(vDisplay)
+                .setClientPostureQuery(clientPosture != null ? clientPosture.toLaunchQuery() : "")
                 .setResolutionScaleFactor(resolutionScaleFactor)
                 .setApp(app)
                 .setEnableUltraLowLatency(prefConfig.enableUltraLowLatency)

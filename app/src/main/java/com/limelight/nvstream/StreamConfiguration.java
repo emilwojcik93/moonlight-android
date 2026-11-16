@@ -15,6 +15,7 @@ public class StreamConfiguration {
     private float refreshRate;
     private float launchRefreshRate;
     private boolean virtualDisplay;
+    private String clientPostureQuery = "";
     private int resolutionScaleFactor;
     private int clientRefreshRateX100;
     private int bitrate;
@@ -63,6 +64,12 @@ public class StreamConfiguration {
 
         public StreamConfiguration.Builder setVirtualDisplay(boolean enable) {
             config.virtualDisplay = enable;
+            return this;
+        }
+
+        /** Query string (no leading '&') with the clientPosture args, or empty to send none. */
+        public StreamConfiguration.Builder setClientPostureQuery(String query) {
+            config.clientPostureQuery = query == null ? "" : query;
             return this;
         }
 
@@ -196,6 +203,8 @@ public class StreamConfiguration {
     }
 
     public boolean getVirtualDisplay() { return virtualDisplay; }
+
+    public String getClientPostureQuery() { return clientPostureQuery; }
 
     public int getResolutionScaleFactor() { return resolutionScaleFactor; }
     
