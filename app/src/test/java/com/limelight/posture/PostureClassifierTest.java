@@ -190,4 +190,72 @@ public class PostureClassifierTest {
         assertTrue(PostureClassifier.crossesBoundary(t2, k3));
         assertFalse(PostureClassifier.crossesBoundary(k1, k3));
     }
+
+    @Test
+    public void gamepadWithoutKeyboardIsHandheld() {
+        Inputs in = touchDevice(411);
+        in.gamepadDevice = true;
+        Result r = PostureClassifier.classify(in);
+        assertEquals(Posture.HANDHELD, r.posture);
+        assertEquals(Confidence.HIGH, r.confidence);
+        assertTrue(r.touch);
+        assertEquals("clientPosture=handheld&clientTouch=1", r.toQuery());
+    }
+
+    @Test
+    public void gamepadButtonsDoNotCountAsAKeyboard() {
+        // A grip such as the GameSir G8 makes Configuration report a hardware keyboard.
+        Inputs in = touchDevice(411);
+        in.gamepadDevice = true;
+        in.hardKeyboardAttached = true;
+        assertEquals(Posture.HANDHELD, PostureClassifier.classify(in).posture);
+    }
+
+    @Test
+    public void realKeyboardWinsOverGamepad() {
+        Inputs in = withKeyboardDevice(411);
+        in.gamepadDevice = true;
+        assertEquals(Posture.LAPTOP, PostureClassifier.classify(in).posture);
+    }
+
+    @Test
+    public void gamepadOnTvStaysDesktop() {
+        Inputs in = touchDevice(411);
+        in.gamepadDevice = true;
+        in.nonHandheldUiMode = true;
+        assertEquals(Posture.DESKTOP, PostureClassifier.classify(in).posture);
+    }
+
+    @Test
+    public void alwaysHandheldAndAlwaysDesktopOverrides() {
+        Inputs in = withKeyboardDevice(411);
+        in.override = UserOverride.ALWAYS_HANDHELD;
+        assertEquals(Posture.HANDHELD, PostureClassifier.classify(in).posture);
+
+        Inputs touch = touchDevice(411);
+        touch.override = UserOverride.ALWAYS_DESKTOP;
+        Result r = PostureClassifier.classify(touch);
+        assertEquals(Posture.LAPTOP, r.posture);
+        assertTrue(r.touch);
+
+        assertEquals(UserOverride.ALWAYS_HANDHELD, UserOverride.fromPreference("handheld"));
+        assertEquals(UserOverride.ALWAYS_DESKTOP, UserOverride.fromPreference("desktop"));
+    }
+
+    @Test
+    public void attachingAGripChangesTheHostModeButNotTheTouchBoundary() {
+        Result phone = PostureClassifier.classify(touchDevice(411));
+        Inputs grip = touchDevice(411);
+        grip.gamepadDevice = true;
+        Result handheld = PostureClassifier.classify(grip);
+
+        assertTrue(PostureClassifier.hostModeChanged(phone, handheld));
+        assertTrue(PostureClassifier.hostModeChanged(handheld, phone));
+        assertFalse(PostureClassifier.crossesBoundary(phone, handheld));
+
+        // Phone to tablet label is not a mode change; keyboard attach is.
+        assertFalse(PostureClassifier.hostModeChanged(phone, PostureClassifier.classify(touchDevice(800))));
+        assertTrue(PostureClassifier.hostModeChanged(phone, PostureClassifier.classify(withKeyboardDevice(411))));
+        assertFalse(PostureClassifier.hostModeChanged(null, PostureClassifier.classify(withKeyboardDevice(411))));
+    }
 }

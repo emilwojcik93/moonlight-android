@@ -185,11 +185,15 @@
     <string-array name="client_posture_names">
         <item>@string/client_posture_auto</item>
         <item>@string/client_posture_always_tablet</item>
+        <item>@string/client_posture_always_handheld</item>
+        <item>@string/client_posture_always_desktop</item>
         <item>@string/client_posture_never</item>
     </string-array>
     <string-array name="client_posture_values" translatable="false">
         <item>auto</item>
         <item>tablet</item>
+        <item>handheld</item>
+        <item>desktop</item>
         <item>never</item>
     </string-array>
     <string-array name="mouse_mode_values" translatable="false">

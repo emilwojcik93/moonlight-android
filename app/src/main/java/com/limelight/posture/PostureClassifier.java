@@ -30,14 +30,23 @@ public final class PostureClassifier {
 
     public enum Confidence { HIGH, LOW }
 
-    /** User setting: Auto / Always tablet / Never. */
+    /** What the host does with a posture; several postures share one mode. */
+    public enum HostMode { DESKTOP, TABLET, HANDHELD }
+
+    /** User setting: Auto / Always tablet / Always handheld / Always desktop / Never. */
     public enum UserOverride {
-        AUTO, ALWAYS_TABLET, NEVER;
+        AUTO, ALWAYS_TABLET, ALWAYS_HANDHELD, ALWAYS_DESKTOP, NEVER;
 
         /** Parses the stored preference value; anything unknown means AUTO. */
         public static UserOverride fromPreference(String value) {
             if ("tablet".equals(value)) {
                 return ALWAYS_TABLET;
+            }
+            if ("handheld".equals(value)) {
+                return ALWAYS_HANDHELD;
+            }
+            if ("desktop".equals(value)) {
+                return ALWAYS_DESKTOP;
             }
             if ("never".equals(value)) {
                 return NEVER;
@@ -58,6 +67,11 @@ public final class PostureClassifier {
         public boolean hardKeyboardAttached;
         /** An enabled, non-virtual InputDevice with an alphabetic keyboard is attached (BT/USB). */
         public boolean alphabeticKeyboardDevice;
+        /**
+         * An enabled, non-virtual gamepad is present: built in (handheld console) or attached
+         * (telescopic grip, Bluetooth pad). With it the device is used like a handheld.
+         */
+        public boolean gamepadDevice;
         /** Smallest screen width in dp; only picks the phone/tablet label. 0 if unknown. */
         public int smallestWidthDp;
     }
@@ -76,6 +90,14 @@ public final class PostureClassifier {
         /** True when the host touch policy would apply (tablet, handheld, phone). */
         public boolean isTouchClass() {
             return posture == Posture.TABLET || posture == Posture.HANDHELD || posture == Posture.PHONE;
+        }
+
+        /** The mode the host picks for this posture: desktop, tablet or handheld. */
+        public HostMode hostMode() {
+            if (posture == Posture.HANDHELD) {
+                return HostMode.HANDHELD;
+            }
+            return isTouchClass() ? HostMode.TABLET : HostMode.DESKTOP;
         }
 
         /** Query string without leading '&', e.g. {@code clientPosture=tablet&clientTouch=1&...}. */
@@ -107,18 +129,37 @@ public final class PostureClassifier {
             return new Result(Posture.TABLET, Confidence.HIGH, true);
         }
 
+        if (in.override == UserOverride.ALWAYS_HANDHELD) {
+            return new Result(Posture.HANDHELD, Confidence.HIGH, true);
+        }
+
+        if (in.override == UserOverride.ALWAYS_DESKTOP) {
+            // Desktop mode on the host, but still a touch device: the host keeps the touch-sized display.
+            return new Result(Posture.LAPTOP, Confidence.HIGH, true);
+        }
+
         if (in.nonHandheldUiMode || in.externalDisplay || !in.hasTouchscreen) {
             // TV, car, desk dock, no touch hardware or a monitor: behaves like a desktop.
             return new Result(Posture.DESKTOP, Confidence.HIGH, false);
         }
 
-        if (in.alphabeticKeyboardDevice || in.hardKeyboardAttached) {
+        if (in.alphabeticKeyboardDevice) {
             // A physical keyboard is in use: desktop mode on the host. The device still has a touch
             // screen (touch = capability), so the host keeps the touch-sized display and a later
             // keyboard detach only switches its mode.
-            // The InputDevice scan is reliable; the Configuration hint alone is not.
-            return new Result(Posture.LAPTOP,
-                    in.alphabeticKeyboardDevice ? Confidence.HIGH : Confidence.LOW, true);
+            return new Result(Posture.LAPTOP, Confidence.HIGH, true);
+        }
+
+        if (in.gamepadDevice) {
+            // A gamepad and no real keyboard: the device is used like a handheld console. This is
+            // checked before the Configuration keyboard hint because a gamepad's buttons make
+            // Android report a (non-alphabetic) hardware keyboard.
+            return new Result(Posture.HANDHELD, Confidence.HIGH, true);
+        }
+
+        if (in.hardKeyboardAttached) {
+            // Only the Configuration hint, no keyboard device found: weak, but still a keyboard.
+            return new Result(Posture.LAPTOP, Confidence.LOW, true);
         }
 
         // Touch-primary. The label does not matter to the host.
@@ -134,6 +175,17 @@ public final class PostureClassifier {
     public static boolean crossesBoundary(Result previous, Result current) {
         boolean before = previous != null && previous.isTouchClass();
         boolean after = current != null && current.isTouchClass();
+        return before != after;
+    }
+
+    /**
+     * Mid-stream rule for telling the host: its mode (desktop, tablet, handheld) would change.
+     * A gamepad grip attached to or removed from a phone changes the mode without crossing the
+     * touch boundary, so this is wider than {@link #crossesBoundary}.
+     */
+    public static boolean hostModeChanged(Result previous, Result current) {
+        HostMode before = previous != null ? previous.hostMode() : HostMode.DESKTOP;
+        HostMode after = current != null ? current.hostMode() : HostMode.DESKTOP;
         return before != after;
     }
 }

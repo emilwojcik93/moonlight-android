@@ -48,6 +48,7 @@ public final class PostureSignals {
                 .hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
 
         in.alphabeticKeyboardDevice = hasPhysicalAlphabeticKeyboard();
+        in.gamepadDevice = hasPhysicalGamepad();
 
         if (display != null) {
             in.externalDisplay = display.getDisplayId() != Display.DEFAULT_DISPLAY;
@@ -65,6 +66,28 @@ public final class PostureSignals {
         }
 
         return PostureClassifier.classify(in);
+    }
+
+    /**
+     * A built-in gamepad (handheld console) or an attached one (telescopic grip, Bluetooth or USB
+     * pad) counts; virtual and disabled devices do not.
+     */
+    public static boolean hasPhysicalGamepad() {
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice dev = InputDevice.getDevice(id);
+            if (dev == null || dev.isVirtual()) {
+                continue;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !dev.isEnabled()) {
+                continue;
+            }
+            int sources = dev.getSources();
+            if ((sources & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+                    && (sources & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** A Bluetooth/USB keyboard counts; the on-screen keyboard (virtual) and keypads/gamepads do not. */

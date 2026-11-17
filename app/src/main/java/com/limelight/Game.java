@@ -1323,7 +1323,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             return;
         }
 
-        boolean tellHost = PostureClassifier.crossesBoundary(clientPosture, current);
+        boolean tellHost = PostureClassifier.hostModeChanged(clientPosture, current);
         final boolean displayStale = PostureClassifier.crossesBoundary(streamPosture, current);
         if (!tellHost && !displayStale) {
             return;
