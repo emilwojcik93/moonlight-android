@@ -395,6 +395,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private PostureClassifier.Result clientPosture;
     // Posture the host display was created with (launch or last reconnect)
     private PostureClassifier.Result streamPosture;
+    /** The host's display_change answer to the latest posture update; null when it gave none. */
+    private Boolean hostDisplayChange;
     private Display postureDisplay;
     private long connectedAtMs;
     private boolean postureListenerRegistered;
@@ -1322,7 +1324,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         boolean tellHost = PostureClassifier.crossesBoundary(clientPosture, current);
-        boolean displayStale = PostureClassifier.crossesBoundary(streamPosture, current);
+        final boolean displayStale = PostureClassifier.crossesBoundary(streamPosture, current);
         if (!tellHost && !displayStale) {
             return;
         }
@@ -1330,21 +1332,43 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (tellHost) {
             clientPosture = current;
             final String query = current.toQuery();
-            // Fire and forget: errors (including stock hosts without /posture) are only logged
+            // Errors (including stock hosts without /posture) are only logged; the host's answer
+            // decides whether the stream has to be resumed.
             new Thread(new Runnable() {
                 @Override
                 public void run() {
+                    Boolean answer = null;
                     try {
-                        httpConn.sendPosture(query);
-                        LimeLog.info("Sent posture update: " + query);
+                        answer = httpConn.sendPosture(query);
+                        LimeLog.info("Sent posture update: " + query + " display_change=" + answer);
                     } catch (Exception e) {
                         LimeLog.warning("Posture update failed: " + e.getMessage());
                     }
+                    final Boolean hostAnswer = answer;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            hostDisplayChange = hostAnswer;
+                            maybeReconnectForPosture(displayStale);
+                        }
+                    });
                 }
             }, "PostureUpdate").start();
+            return;
         }
 
-        // The host reads the monitor size only when the display is created, so a flip needs a resume.
+        maybeReconnectForPosture(displayStale);
+    }
+
+    // A host that answers display_change keeps its display across keyboard flips, so no resume is
+    // needed; older hosts read the monitor size only when the display is created and need one.
+    private void maybeReconnectForPosture(boolean displayStale) {
+        if (!connected || pendingPostureRelaunch != null || timerHandler == null) {
+            return;
+        }
+        if (!PostureReconnectGate.reconnectNeeded(hostDisplayChange, displayStale)) {
+            return;
+        }
         long delay = PostureReconnectGate.delayMs(prefConfig.reconnectOnPostureChange, connected,
                 SystemClock.elapsedRealtime(), connectedAtMs, lastPostureReconnectMs);
         if (delay == 0) {

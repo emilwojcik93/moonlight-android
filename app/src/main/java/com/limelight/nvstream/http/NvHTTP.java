@@ -922,10 +922,13 @@ public class NvHTTP {
 
     // Mid-stream posture update for hosts that support it (Vibepollo /posture). Stock hosts
     // answer with an error (404 or non-200 status), which surfaces as an exception here.
-    public void sendPosture(String query) throws IOException, XmlPullParserException {
+    // Returns the host's display_change answer: TRUE when it needs a new display for the new posture,
+    // FALSE when the running display still fits, null when the host did not say.
+    public Boolean sendPosture(String query) throws IOException, XmlPullParserException {
         String xmlStr = openHttpConnectionToString(httpClientLongConnectTimeout, getHttpsUrl(true), "posture", query);
         // Parsing the root element throws HostHttpResponseException on a non-200 status_code
         getXmlString(xmlStr, "root", false);
+        return com.limelight.posture.PostureReconnectGate.parseDisplayChange(xmlStr);
     }
 
     public String getClipboard() throws IOException {

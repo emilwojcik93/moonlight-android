@@ -1,6 +1,9 @@
 package com.limelight.posture;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -51,5 +54,26 @@ public class PostureReconnectGateTest {
     @Test
     public void firstFlipAfterLongStreamReconnectsImmediately() {
         assertEquals(0, PostureReconnectGate.delayMs(true, true, 3_600_000, 0, NONE));
+    }
+
+    @Test
+    public void hostAnswerDecidesReconnect() {
+        // Keyboard flip on a host that keeps its display: never reconnect
+        assertFalse(PostureReconnectGate.reconnectNeeded(Boolean.FALSE, true));
+        assertTrue(PostureReconnectGate.reconnectNeeded(Boolean.TRUE, false));
+        // Older hosts say nothing: previous rule
+        assertTrue(PostureReconnectGate.reconnectNeeded(null, true));
+        assertFalse(PostureReconnectGate.reconnectNeeded(null, false));
+    }
+
+    @Test
+    public void parsesDisplayChangeFromTheRootElement() {
+        assertEquals(Boolean.FALSE, PostureReconnectGate.parseDisplayChange(
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<root display_change=\"0\" status_code=\"200\"/>"));
+        assertEquals(Boolean.TRUE, PostureReconnectGate.parseDisplayChange("<root status_code=\"200\" display_change=\"1\"/>"));
+        assertNull(PostureReconnectGate.parseDisplayChange("<root status_code=\"200\"/>"));
+        assertNull(PostureReconnectGate.parseDisplayChange("<root display_change=\"x\"/>"));
+        assertNull(PostureReconnectGate.parseDisplayChange("<root status_code=\"200\"><a display_change=\"1\"/></root>"));
+        assertNull(PostureReconnectGate.parseDisplayChange(null));
     }
 }

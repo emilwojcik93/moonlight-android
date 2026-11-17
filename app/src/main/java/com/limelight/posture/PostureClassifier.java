@@ -113,10 +113,12 @@ public final class PostureClassifier {
         }
 
         if (in.alphabeticKeyboardDevice || in.hardKeyboardAttached) {
-            // A physical keyboard is in use: the host keeps its default display size.
+            // A physical keyboard is in use: desktop mode on the host. The device still has a touch
+            // screen (touch = capability), so the host keeps the touch-sized display and a later
+            // keyboard detach only switches its mode.
             // The InputDevice scan is reliable; the Configuration hint alone is not.
             return new Result(Posture.LAPTOP,
-                    in.alphabeticKeyboardDevice ? Confidence.HIGH : Confidence.LOW, false);
+                    in.alphabeticKeyboardDevice ? Confidence.HIGH : Confidence.LOW, true);
         }
 
         // Touch-primary. The label does not matter to the host.

@@ -53,9 +53,9 @@ public class PostureClassifierTest {
             Result r = PostureClassifier.classify(withKeyboardDevice(sw));
             assertEquals(Posture.LAPTOP, r.posture);
             assertEquals(Confidence.HIGH, r.confidence);
-            assertFalse(r.touch);
+            assertTrue(r.touch);
             assertFalse(r.isTouchClass());
-            assertEquals("clientPosture=laptop&clientTouch=0", r.toLaunchQuery());
+            assertEquals("clientPosture=laptop&clientTouch=1", r.toLaunchQuery());
         }
     }
 
